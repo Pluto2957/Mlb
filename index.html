@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>量化交易終端 v13.5 (Uncapped MLB 極限注碼版)</title>
+    <title>量化交易終端 v13.6 (Uncapped MLB 極限注碼 + 盤口精準標示版)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --primary-color: #4361ee; --success-bg: #dcfce7; --success-text: #166534; --warning-bg: #fef9c3; --warning-text: #854d0e; --danger-text: #dc2626; --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
@@ -112,9 +112,9 @@
         .type-btn { flex: 1; padding: 8px; border: none; background: #f1f5f9; color: #64748b; cursor: pointer; font-size: 0.85em; font-weight: bold; border-right: 1px solid #cbd5e1; border-radius: 0; }
         .type-btn.active { background: var(--primary-color); color: white; }
 
-        .signal-badge { padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.9em; display: inline-block; }
-        .badge-buy { background-color: #ffffff; color: var(--success-text); border: 1px solid #86efac; cursor: pointer; text-decoration: underline; }
-        .badge-buy:hover { background-color: #dcfce7; }
+        .signal-badge { padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.9em; display: inline-block; white-space: nowrap; }
+        .badge-buy { background-color: #ffffff; color: var(--success-text); border: 1px solid #86efac; cursor: pointer; text-decoration: none; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: all 0.2s; }
+        .badge-buy:hover { background-color: #dcfce7; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .badge-observe { background-color: #ffffff; color: var(--warning-text); border: 1px solid #fde047; }
         
         .section-title { font-size: 1.2rem; font-weight: bold; margin: 20px 0 10px 0; color: #334155; border-left: 5px solid var(--primary-color); padding-left: 10px; }
@@ -133,7 +133,7 @@
     </style>
 </head>
 <body>
-    <h1>🚀 交易模擬器 v13.5 (Uncapped MLB 極限注碼版)</h1>
+    <h1>🚀 交易模擬器 v13.6 (Uncapped MLB 極限注碼 + 盤口精準標示版)</h1>
     
     <div class="ticker-container">
         <div class="ticker-content">
@@ -154,7 +154,7 @@
                     <option value="ncaaf">🎓 NCAA Football</option>
                 </select>
             </div>
-            <div style="font-size: 0.85em; color: #64748b; background: #f1f5f9; padding: 5px 10px; border-radius: 4px;">📅 MLB Engine: v4.0 (SOP Dynamic Max-Risk)</div>
+            <div style="font-size: 0.85em; color: #64748b; background: #f1f5f9; padding: 5px 10px; border-radius: 4px;">📅 MLB Engine: v4.1 (SOP Dynamic Max-Risk)</div>
         </div>
 
         <div class="bankroll-container">
@@ -281,7 +281,7 @@
                     </li>
                     <li>
                         <div class="help-title">🏦 資金管理與注碼</div>
-                        <div class="help-desc">系統自動執行逐日階梯倍投。<b>請注意：目前已解除 MLB 單注防呆上限</b>，系統將完全依照極限動態矩陣火力全開 (最高 3.625%)，請自行留意高額下注時在市場中的流動性風險。</div>
+                        <div class="help-desc">系統自動執行逐日階梯倍投。<b>請注意：目前已解除 MLB 單注防呆上限</b>，系統將完全依照極限動態矩陣火力全開 (最高 3.625%)，請自行留意高額下注時在市場中的流動性風險。下注按鈕會明確標示該下注 <b>獨贏(ML)</b> 或是 <b>讓分(RL)</b>。</div>
                     </li>
                 </ul>
             </div>
@@ -341,7 +341,7 @@
             <input type="hidden" id="modalTeam">
             <input type="hidden" id="internalPrice">
             
-            <div class="modal-row"><label>下注對象:</label><input type="text" id="modalTeamDisplay" disabled style="background:#f1f5f9; font-weight:bold;"></div>
+            <div class="modal-row"><label>下注對象:</label><input type="text" id="modalTeamDisplay" disabled style="background:#f1f5f9; font-weight:bold; color: #1e40af;"></div>
             
             <div class="modal-row" style="margin-bottom: 10px;">
                 <label style="font-size:0.9em; margin-bottom:3px;">賠率格式 (Odds Format):</label>
@@ -355,7 +355,7 @@
             <div class="modal-row"><label>下注金額 (USD):</label><input type="number" id="modalStake" step="1"></div>
             
             <div class="modal-row">
-                <label id="priceLabel">買入價格 (Price):</label>
+                <label id="priceLabel">對應買入價格 (Price):</label>
                 <input type="number" id="modalPrice" step="0.01" oninput="updateBetCalc()">
             </div>
             
@@ -486,7 +486,7 @@
     function decimalToPoly(d) { return d <= 0 ? 0 : 1/d; }
 
     // ==========================================
-    // 全新 MLB 極限化量化策略引擎 (v4.0)
+    // 全新 MLB 極限化量化策略引擎 (v4.1) 附加盤口類型辨識
     // ==========================================
     function calculateMlbStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, vSpreadStr, bankroll) {
         if (vML === null || hML === null || !utcDate) {
@@ -577,7 +577,6 @@
             tier = stratKey;
         }
 
-        // 回測最佳化注碼比例 (Target MDD 45-50%)
         let pct = 0;
         if (tier === 'S') pct = 0.03625;                 
         else if (stratKey === 'C' || stratKey === 'B') pct = 0.02175; 
@@ -586,12 +585,19 @@
 
         let betSize = bankroll * pct;
 
+        // 計算精準的下注類型文字與真實賠率
+        let betTypeStr = (stratKey === 'D') ? '讓分+1.5' : '獨贏ML';
+        let recOdds = (stratKey === 'D') ? vSpreadOdds : (targetType === 'Home' ? hML : vML);
+        let recPrice = getImpliedProb(recOdds);
+
         return {
             signal: (targetType === 'Home' ? '[主] ' : '[客] ') + ruleName,
-            stake: `$${betSize.toFixed(1)} (${(pct * 100).toFixed(2)}%)`,
+            stake: `[${betTypeStr}] $${betSize.toFixed(1)} (${(pct * 100).toFixed(2)}%)`,
             color: "buy",
             highlightTarget: targetType === 'Home' ? 'home' : 'visitor',
-            edge: calculatedEdge
+            edge: calculatedEdge,
+            betTypeStr: betTypeStr,
+            recPrice: recPrice
         };
     }
 
@@ -968,9 +974,22 @@
     }
 
     function setHistoryFilter(type) { historyFilter = type; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); if (type === 'all') document.getElementById('filterAll').classList.add('active'); if (type === 'settled') document.getElementById('filterSettled').classList.add('active'); if (type === 'sold') document.getElementById('filterSold').classList.add('active'); renderPortfolio(); }
-    function setOddsMode(mode) { oddsMode = mode; localStorage.setItem('pms_odds_mode', mode); document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active')); if(mode === 'polymarket') document.getElementById('btnModePoly').classList.add('active'); if(mode === 'american') document.getElementById('btnModeAmer').classList.add('active'); if(mode === 'decimal') document.getElementById('btnModeDec').classList.add('active'); const input = document.getElementById('modalPrice'); const internalPrice = parseFloat(document.getElementById('internalPrice').value) || 0.5; if (mode === 'polymarket') { document.getElementById('priceLabel').textContent = "買入價格 (Price):"; input.step = "0.01"; input.value = internalPrice.toFixed(2); } else if (mode === 'american') { document.getElementById('priceLabel').textContent = "美式賠率 (Odds):"; input.step = "1"; input.value = polyToAmerican(internalPrice); } else if (mode === 'decimal') { document.getElementById('priceLabel').textContent = "歐/英賠率 (Decimal):"; input.step = "0.01"; input.value = polyToDecimal(internalPrice); } updateBetCalc(); }
+    function setOddsMode(mode) { oddsMode = mode; localStorage.setItem('pms_odds_mode', mode); document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active')); if(mode === 'polymarket') document.getElementById('btnModePoly').classList.add('active'); if(mode === 'american') document.getElementById('btnModeAmer').classList.add('active'); if(mode === 'decimal') document.getElementById('btnModeDec').classList.add('active'); const input = document.getElementById('modalPrice'); const internalPrice = parseFloat(document.getElementById('internalPrice').value) || 0.5; if (mode === 'polymarket') { document.getElementById('priceLabel').textContent = "對應買入價格 (Price):"; input.step = "0.01"; input.value = internalPrice.toFixed(2); } else if (mode === 'american') { document.getElementById('priceLabel').textContent = "美式賠率 (Odds):"; input.step = "1"; input.value = polyToAmerican(internalPrice); } else if (mode === 'decimal') { document.getElementById('priceLabel').textContent = "歐/英賠率 (Decimal):"; input.step = "0.01"; input.value = polyToDecimal(internalPrice); } updateBetCalc(); }
     function updateBetCalc() { const stake = parseFloat(document.getElementById('modalStake').value) || 0; const rawInput = parseFloat(document.getElementById('modalPrice').value); let finalPrice = 0.5; if (!isNaN(rawInput)) { if (oddsMode === 'polymarket') finalPrice = rawInput; else if (oddsMode === 'american') finalPrice = americanToPoly(rawInput); else if (oddsMode === 'decimal') finalPrice = decimalToPoly(rawInput); } if (finalPrice <= 0) finalPrice = 0.01; if (finalPrice >= 1) finalPrice = 0.99; document.getElementById('internalPrice').value = finalPrice; const shares = stake / finalPrice; const profit = shares - stake; document.getElementById('calcShares').textContent = shares.toFixed(2); document.getElementById('calcProfit').textContent = '$' + profit.toFixed(2); }
-    function openBetModal(team, stake, price, visitor, home, targetType) { document.getElementById('modalSport').value = currentSport; document.getElementById('modalTeam').value = team; const typeSuffix = targetType === 'Home' ? '(主)' : '(客)'; document.getElementById('modalTeamDisplay').value = `${team} ${typeSuffix}`; document.getElementById('modalMatchup').textContent = `${visitor} (客) vs ${home} (主)`; document.getElementById('modalStake').value = Math.round(stake); document.getElementById('internalPrice').value = price || 0.5; setOddsMode(oddsMode); document.getElementById('betModal').style.display = 'flex'; }
+    
+    function openBetModal(team, stake, price, visitor, home, targetType, betTypeStr) { 
+        document.getElementById('modalSport').value = currentSport; 
+        document.getElementById('modalTeam').value = team; 
+        const typeSuffix = targetType === 'Home' ? '(主)' : '(客)'; 
+        const betTypeDisplay = betTypeStr ? ` [${betTypeStr}]` : '';
+        document.getElementById('modalTeamDisplay').value = `${team} ${typeSuffix}${betTypeDisplay}`; 
+        document.getElementById('modalMatchup').textContent = `${visitor} (客) vs ${home} (主)`; 
+        document.getElementById('modalStake').value = Math.round(stake); 
+        document.getElementById('internalPrice').value = price || 0.5; 
+        setOddsMode(oddsMode); 
+        document.getElementById('betModal').style.display = 'flex'; 
+    }
+    
     function setMaxShares() { const betId = document.getElementById('sellBetId').value; const bet = bettingData.openBets.find(b => b.id == betId); if(bet) { document.getElementById('sellShares').value = bet.shares; document.getElementById('sellShares').dispatchEvent(new Event('input')); } }
     function openSellModal(betId) { const bet = bettingData.openBets.find(b => b.id === betId); if(!bet) return; document.getElementById('sellBetId').value = betId; document.getElementById('sellTeamDisplay').value = bet.team; document.getElementById('maxShares').textContent = bet.shares.toFixed(2); document.getElementById('sellShares').value = bet.shares.toFixed(2); document.getElementById('sellPrice').value = 0.50; const updateSellCalc = () => { const shares = parseFloat(document.getElementById('sellShares').value) || 0; const price = parseFloat(document.getElementById('sellPrice').value) || 0; const payout = shares * price; const costBasis = shares * bet.price; const pnl = payout - costBasis; document.getElementById('calcSellPayout').textContent = '$' + payout.toFixed(2); const pnlSpan = document.getElementById('calcSellPnL'); pnlSpan.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2); pnlSpan.style.color = pnl >= 0 ? '#16a34a' : '#dc2626'; }; document.getElementById('sellShares').oninput = updateSellCalc; document.getElementById('sellPrice').oninput = updateSellCalc; updateSellCalc(); document.getElementById('sellModal').style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -1151,8 +1170,11 @@
                     const amt = amtMatch ? parseFloat(amtMatch[1]) : 0;
                     const targetTeam = strategyRes.highlightTarget === 'visitor' ? visitor : home;
                     const targetType = strategyRes.highlightTarget === 'visitor' ? 'Away' : 'Home'; 
-                    const impliedPrice = strategyRes.highlightTarget === 'visitor' ? (vMLVal ? getImpliedProb(vMLVal) : 0.5) : (hMLVal ? getImpliedProb(hMLVal) : 0.5);
-                    modalAttr = `onclick="openBetModal('${targetTeam.replace(/'/g, "\\'")}', ${amt}, ${impliedPrice.toFixed(2)}, '${visitor.replace(/'/g, "\\'")}', '${home.replace(/'/g, "\\'")}', '${targetType}')"`;
+                    
+                    const impliedPrice = strategyRes.recPrice !== undefined ? strategyRes.recPrice : (strategyRes.highlightTarget === 'visitor' ? (vMLVal ? getImpliedProb(vMLVal) : 0.5) : (hMLVal ? getImpliedProb(hMLVal) : 0.5));
+                    const betTypeStr = strategyRes.betTypeStr || '';
+
+                    modalAttr = `onclick="openBetModal('${targetTeam.replace(/'/g, "\\'")}', ${amt}, ${impliedPrice.toFixed(2)}, '${visitor.replace(/'/g, "\\'")}', '${home.replace(/'/g, "\\'")}', '${targetType}', '${betTypeStr}')"`;
                     stakeHtml = `<span class="badge-buy" ${modalAttr}>${strategyRes.stake}</span>`;
                 }
 
