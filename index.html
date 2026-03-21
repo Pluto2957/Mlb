@@ -628,36 +628,91 @@
         return { signal: (result.type==='Home'?'[主] ':'[客] ') + result.ruleName, stake: `$${finalAmt.toFixed(1)} (${(finalStakePct * 100).toFixed(2)}%)`, color: "buy", highlightTarget: result.type === 'Home' ? 'home' : 'visitor', edge: result.edge };
     }
 
+    // ==========================================
+    // 1. 賠率解析模組：強制永遠只抓取「第一組」賠率 (賽前最真實數據)
+    // ==========================================
+    function parseOdds(oddsStr) {
+        if (!oddsStr) return { away: null, home: null }; 
+        const str = oddsStr.toString(); 
+        const matches = str.match(/[+-]\d+/g); 
+        
+        if (!matches || matches.length < 2) return { away: null, home: null };
+        return { away: parseInt(matches[0]), home: parseInt(matches[1]) };
+    }
+
+    // ==========================================
+    // 2. NFL 核心量化決策模組
+    // ==========================================
+    function evaluateNFLStrategy(dateObj, visitor, home, vModel, hModel, vPrice, hPrice, vDecOdds, hDecOdds) {
+        const vEdge = vModel - vPrice;
+        const hEdge = hModel - hPrice;
+        const month = dateObj.getUTCMonth(); 
+        
+        let result = { type: null, ruleName: null, target: null, trueProb: 0, edge: 0, price: 0 };
+
+        if (vModel >= 0.65 && vEdge >= 0.03) {
+            result = { type: 'Away', target: visitor, ruleName: '🚀 Core Away Fav (>65%)', edge: vEdge, price: vPrice, trueProb: vModel };
+        } else if (hModel >= 0.65 && hEdge >= 0.06) {
+            result = { type: 'Home', target: home, ruleName: '🏰 Core Home Fav (>65%)', edge: hEdge, price: hPrice, trueProb: hModel };
+        } else if (vModel >= 0.35 && vModel < 0.50 && vEdge >= 0.04 && vEdge < 0.07) {
+            result = { type: 'Away', target: visitor, ruleName: '💎 Away Dog Sweet (35-50%)', edge: vEdge, price: vPrice, trueProb: vModel };
+        } else if (hModel >= 0.50 && hModel < 0.60 && hEdge >= 0.04 && hEdge < 0.06) {
+            result = { type: 'Home', target: home, ruleName: '🔥 Home Fav Sweet (50-60%)', edge: hEdge, price: hPrice, trueProb: hModel };
+        } else if (vModel >= 0.70 && vModel < 0.85 && vEdge >= 0.02 && vEdge < 0.08) {
+            result = { type: 'Away', target: visitor, ruleName: '👑 Elite Away Discount (70-85%)', edge: vEdge, price: vPrice, trueProb: vModel };
+        } else {
+            return null;
+        }
+
+        const b = result.type === 'Home' ? (hDecOdds - 1) : (vDecOdds - 1);
+        const kelly_f = result.trueProb - ((1 - result.trueProb) / b);
+        
+        const isPlayoff = (month === 0 || month === 1);
+        
+        const kelly_mult = isPlayoff ? 0.40 : 0.81; 
+        const max_cap = isPlayoff ? 0.06 : 0.12;    
+        
+        const stakePct = kelly_f * kelly_mult;
+        result.stakePct = Math.max(0.01, Math.min(stakePct, max_cap)); 
+        
+        if (result.stakePct <= 0 || isNaN(result.stakePct)) return null;
+
+        return result; 
+    }
+
+    // ==========================================
+    // 3. 橋接轉換函數 (替換原版的 calculateNflStrategy)
+    // ==========================================
     function calculateNflStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, bankroll) {
-        const vModel = vModelProb / 100.0; const hModel = hModelProb / 100.0;
-        if (vML === null || hML === null) return { signal: "-", stake: "-", color: "none", highlightTarget: null };
-        const vPrice = getImpliedProb(vML); const hPrice = getImpliedProb(hML);
-        const vEdge = vModel - vPrice; const hEdge = hModel - hPrice;
-        const vDec = vML > 0 ? (vML / 100) + 1 : (100 / Math.abs(vML)) + 1;
-        const isJanuary = (utcDate && utcDate.getUTCMonth() === 0);
-        let action = { type: null, target: null, cap: 0, reason: "", edge: 0 };
-        if (vModel >= 0.50 && vModel < 0.55) action = { type: 'Follow', target: visitor, cap: 0.088, reason: "Guest 50-55% (Follow)", edge: vEdge };
-        else if (vModel >= 0.55 && vModel < 0.60) action = { type: 'Bet', target: home, cap: 0.05, reason: "Guest 55-60% (Fade)", edge: hEdge };
-        else if (vModel >= 0.60 && vModel < 0.65) action = { type: 'Pass', target: null, cap: 0, reason: "Guest 60-65% (Pass)" };
-        else if (vModel >= 0.65 && vModel < 0.75) action = { type: 'Follow', target: visitor, cap: 0.088, reason: "Guest 65-75% (Follow)", edge: vEdge };
-        else if (vModel >= 0.75 && vModel < 0.80) action = { type: 'Bet', target: home, cap: 0.10, reason: "Guest 75-80% (Fade)", edge: hEdge };
-        else if (hModel >= 0.50 && hModel < 0.65) action = { type: 'Bet', target: visitor, cap: 0.08, reason: "Home 50-65% (Gold Zone)", edge: vEdge };
-        else if (hModel >= 0.65 && hModel < 0.75) action = { type: 'Follow', target: home, cap: 0.053, reason: "Home 65-75% (Follow)", edge: hEdge };
-        else if (hModel >= 0.75 && hModel < 0.80) action = { type: 'Bet', target: visitor, cap: 0.04, reason: "Home 75-80% (Fade)", edge: vEdge };
-        else if (hModel >= 0.80 && hModel < 0.90) action = { type: 'Pass', target: null, cap: 0, reason: "Home 80-90% (Trap)" };
-        else if (hModel >= 0.90) action = { type: 'Follow', target: home, cap: 0.053, reason: "Home 90%+ (Follow)", edge: hEdge };
-        const goldenBlacklistKW = ["Jaguars", "Jets", "Broncos"]; let isGoldenDog = false;
-        if (vDec >= 2.5 && vDec <= 4.0 && !goldenBlacklistKW.some(kw => visitor.includes(kw))) { isGoldenDog = true; action = { type: 'Golden', target: visitor, cap: 0.08, reason: "🏆 Golden Road Dog", edge: vEdge }; if (visitor.includes("Steelers") || visitor.includes("Cardinals")) { action.cap = 0.12; action.reason += " (Boost)"; } }
-        const toxicKW = ["Jets", "49ers", "Falcons", "Panthers", "Cardinals", "Commanders", "Chargers"];
-        if (action.target && toxicKW.some(kw => action.target.includes(kw))) { return { signal: `Toxic Filter (Avoid ${action.target})`, stake: "Observe", color: "observe", highlightTarget: action.target === home ? 'home' : 'visitor' }; }
-        if (!action.target || action.type === 'Pass') return { signal: action.reason || "No Signal", stake: "-", color: "none", highlightTarget: null };
-        let p = (action.target === visitor) ? vModel : hModel; let q = (action.target === visitor) ? vPrice : hPrice;
-        if (isGoldenDog && p < 0.40) p = 0.40;
-        if (p <= q) return { signal: `${action.reason} (Neg EV)`, stake: "Skip", color: "none", highlightTarget: null };
-        let rawStake = ((p - q) / (1 - q)) * 1.35; if (isJanuary) rawStake = rawStake * 0.5;
-        let finalStakePct = Math.min(rawStake, action.cap); if (finalStakePct <= 0) return { signal: `${action.reason} (Low Edge)`, stake: "Skip", color: "none", highlightTarget: null };
-        let finalAmt = finalStakePct * bankroll;
-        return { signal: (action.target===home?'[主] ':'[客] ') + action.reason, stake: `$${finalAmt.toFixed(1)} (${(finalStakePct * 100).toFixed(2)}%${isJanuary?" Jan":""})`, color: "buy", highlightTarget: action.target===home ? 'home' : 'visitor', edge: action.edge };
+        if (vML === null || hML === null || !utcDate) return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
+        
+        const vModel = vModelProb / 100.0; 
+        const hModel = hModelProb / 100.0;
+        const vPrice = getImpliedProb(vML); 
+        const hPrice = getImpliedProb(hML);
+        
+        // 將美式賠率轉換為十進位賠率以供 Kelly 公式計算
+        const vDecOdds = vML > 0 ? (vML / 100) + 1 : (100 / Math.abs(vML)) + 1;
+        const hDecOdds = hML > 0 ? (hML / 100) + 1 : (100 / Math.abs(hML)) + 1;
+
+        const evalResult = evaluateNFLStrategy(utcDate, visitor, home, vModel, hModel, vPrice, hPrice, vDecOdds, hDecOdds);
+
+        if (!evalResult) {
+            return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
+        }
+
+        // 對應回 UI 所需的變數格式
+        const finalAmt = evalResult.stakePct * bankroll;
+        
+        return { 
+            signal: (evalResult.type === 'Home' ? '[主] ' : '[客] ') + evalResult.ruleName, 
+            stake: `[獨贏ML] $${finalAmt.toFixed(1)} (${(evalResult.stakePct * 100).toFixed(2)}%)`, 
+            color: "buy", 
+            highlightTarget: evalResult.type === 'Home' ? 'home' : 'visitor', 
+            edge: evalResult.edge,
+            betTypeStr: '獨贏ML',
+            recPrice: evalResult.price
+        };
     }
 
     function calculateNcaafStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, bankroll) {
