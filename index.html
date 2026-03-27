@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>量化交易終端 v13.6.1 (Uncapped MLB 極限注碼 + 盤口精準標示版)</title>
+    <title>量化交易終端 v13.6.3 (雙市場手續費自適應版)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
@@ -136,7 +136,7 @@
     </style>
 </head>
 <body>
-    <h1>🚀 交易模擬器 v13.6.1 (Uncapped MLB 極限注碼 + 盤口精準標示版)</h1>
+    <h1>🚀 交易模擬器 v13.6.3 (雙市場手續費自適應版)</h1>
     
     <div class="ticker-container">
         <div class="ticker-content">
@@ -194,7 +194,7 @@
             <button class="btn-img" onclick="exportToJPG()">📸 匯出戰績圖</button>
             <button class="secondary" onclick="openHelpModal()">📘 使用說明</button>
             <button class="secondary" onclick="toggleOddsDisplay()">🔄 切換賠率格式</button>
-            <button class="secondary" onclick="openHistoryModal()">📜 異提紀錄</button>
+            <button class="secondary" onclick="openHistoryModal()">📜 異動紀錄</button>
             <button class="secondary" onclick="clearHistory()" style="background-color: #ef4444;">🗑️ 重置</button>
             
             <div id="statusContainer" class="status-wrapper">
@@ -285,12 +285,12 @@
                         <div class="help-desc">策略建議旁會顯示綠色的 (+EV X%)，代表模型算出的勝率高於莊家隱含勝率的「淨優勢比例」。數值越高，長期獲利空間越大。</div>
                     </li>
                     <li>
-                        <div class="help-title">🏦 資金管理與注碼</div>
-                        <div class="help-desc">系統自動執行逐日階梯倍投。<b>請注意：目前已解除 MLB 單注防呆上限</b>，系統將完全依照極限動態矩陣火力全開 (最高 3.625%)，請自行留意高額下注時在市場中的流動性風險。下注按鈕會明確標示該下注 <b>獨贏(ML)</b> 或是 <b>讓分(RL)</b>。</div>
+                        <div class="help-title">🏦 動態手續費自適應 (雙市場支援)</div>
+                        <div class="help-desc">當您選擇 <b>Poly (0.xx)</b> 賠率格式時，系統會自動啟用 Polymarket 專屬的動態手續費；當您切換為 <b>美式 (+/-)</b> 或 <b>歐/英 (x.xx)</b> 格式時，因其賠率已含莊家水錢，系統將自動將手續費降為 $0 進行精準回測。</div>
                     </li>
                     <li>
-                        <div class="help-title">📈 純盈虧圖表 (新功能)</div>
-                        <div class="help-desc">新的資金曲線已過濾掉出入金的操作，將直接反映出您累加的純盈虧 (P&L)。</div>
+                        <div class="help-title">📈 純盈虧圖表</div>
+                        <div class="help-desc">資金曲線已過濾掉出入金的操作，將直接反映出您累加的純盈虧 (P&L)。</div>
                     </li>
                 </ul>
             </div>
@@ -370,6 +370,7 @@
             
             <div class="modal-row" style="background:#f0f9ff; padding:10px; border-radius:4px;">
                 <div class="calc-info"><span>預估股數 (Shares):</span><span id="calcShares" style="font-weight:bold;">0.00</span></div>
+                <div class="calc-info"><span>預估手續費 (Fee):</span><span id="calcFee" style="font-weight:bold; color:#f59e0b;">$0.0000</span></div>
                 <div class="calc-info"><span>潛在獲利 (Profit):</span><span id="calcProfit" style="font-weight:bold; color:#16a34a;">$0.00</span></div>
             </div>
             <div class="modal-actions"><button class="secondary" onclick="closeModal('betModal')">取消</button><button onclick="confirmBet()">✅ 確認買入</button></div>
@@ -387,7 +388,8 @@
             </div>
             <div class="modal-row"><label>賣出價格 (Price):</label><input type="number" id="sellPrice" step="0.01" max="0.99"></div>
             <div class="modal-row" style="background:#fff7ed; padding:10px; border-radius:4px;">
-                <div class="calc-info"><span>預估回報 (Payout):</span><span id="calcSellPayout" style="font-weight:bold;">$0.00</span></div>
+                <div class="calc-info"><span>預估手續費 (Fee):</span><span id="calcSellFee" style="font-weight:bold; color:#f59e0b;">$0.0000</span></div>
+                <div class="calc-info"><span>實收回報 (Net Payout):</span><span id="calcSellPayout" style="font-weight:bold;">$0.00</span></div>
                 <div class="calc-info"><span>本次損益 (P&L):</span><span id="calcSellPnL" style="font-weight:bold;">$0.00</span></div>
             </div>
             <div class="modal-actions"><button class="secondary" onclick="closeModal('sellModal')">取消</button><button class="btn-sell" onclick="confirmSell()">💸 確認賣出</button></div>
@@ -430,6 +432,16 @@
     let currentSport = 'mlb', history = {}, myChart = null, statsChart = null;
     let oddsMode = localStorage.getItem('pms_odds_mode') || 'polymarket'; 
     let currentFetchId = 0; 
+
+    // ==========================================
+    // Polymarket 手續費計算邏輯
+    // ==========================================
+    function calculatePolyFee(shares, price) {
+        if (!shares || !price) return 0;
+        let fee = shares * price * 0.03 * price * (1 - price);
+        fee = Math.round(fee * 10000) / 10000;
+        return fee > 0 ? fee : 0;
+    }
 
     function showToast(message) {
         const container = document.getElementById('toast-container');
@@ -494,120 +506,32 @@
     function americanToPoly(a) { return a > 0 ? 100/(a+100) : Math.abs(a)/(Math.abs(a)+100); }
     function decimalToPoly(d) { return d <= 0 ? 0 : 1/d; }
 
-    // ==========================================
-    // 全新 MLB 極限化量化策略引擎 (v4.1) 附加盤口類型辨識
-    // ==========================================
     function calculateMlbStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, vSpreadStr, bankroll) {
-        if (vML === null || hML === null || !utcDate) {
-            return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
-        }
-        
-        const vModel = vModelProb / 100.0;
-        const hModel = hModelProb / 100.0;
-        const vPrice = getImpliedProb(vML); 
-        const hPrice = getImpliedProb(hML);
-        const vEdge = vModel - vPrice; 
-        const hEdge = hModel - hPrice;
-        
-        const month = utcDate.getUTCMonth() + 1; 
-
-        let vSpreadLine = null;
-        let vSpreadOdds = null;
-        if (vSpreadStr && vSpreadStr !== '-') {
-            const spreadMatch = String(vSpreadStr).match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+)\)/);
-            if (spreadMatch) {
-                vSpreadLine = parseFloat(spreadMatch[1]);
-                vSpreadOdds = parseFloat(spreadMatch[2]);
-            }
-        }
-        
-        let signalType = null;
-        let targetTeam = "";
-        let ruleName = "";
-        let targetType = ""; 
-        let calculatedEdge = 0;
-        let stratKey = null;
-        let margin = 0;
-
-        let awayBetPlaced = false;
-
-        // 第一階段：客場對位與禁區過濾
+        if (vML === null || hML === null || !utcDate) { return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 }; }
+        const vModel = vModelProb / 100.0; const hModel = hModelProb / 100.0; const vPrice = getImpliedProb(vML); const hPrice = getImpliedProb(hML);
+        const vEdge = vModel - vPrice; const hEdge = hModel - hPrice; const month = utcDate.getUTCMonth() + 1; 
+        let vSpreadLine = null; let vSpreadOdds = null;
+        if (vSpreadStr && vSpreadStr !== '-') { const spreadMatch = String(vSpreadStr).match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+)\)/); if (spreadMatch) { vSpreadLine = parseFloat(spreadMatch[1]); vSpreadOdds = parseFloat(spreadMatch[2]); } }
+        let signalType = null; let targetTeam = ""; let ruleName = ""; let targetType = ""; let calculatedEdge = 0; let stratKey = null; let margin = 0; let awayBetPlaced = false;
         if (vModel < 0.65) {
             if (!( (month === 7 || month === 10) && vModel >= 0.50 )) {
-                if (vModel >= 0.40 && vModel <= 0.45 && vML > 110) {
-                    signalType = 'Away'; targetTeam = visitor; targetType = 'Away'; 
-                    ruleName = "🔥 策略 C (客主力獨贏)"; calculatedEdge = vEdge; margin = vEdge; stratKey = 'C';
-                    awayBetPlaced = true;
-                }
-                
-                if (!awayBetPlaced) {
-                    if (vModel >= 0.40 && vModel <= 0.50 && vSpreadLine === 1.5 && vSpreadOdds >= -200 && vSpreadOdds <= -110) {
-                        signalType = 'Away'; targetTeam = visitor; targetType = 'Away'; 
-                        ruleName = "🛡️ 策略 D (客受讓保險)"; calculatedEdge = 0; margin = 0; stratKey = 'D'; 
-                        awayBetPlaced = true;
-                    }
-                }
+                if (vModel >= 0.40 && vModel <= 0.45 && vML > 110) { signalType = 'Away'; targetTeam = visitor; targetType = 'Away'; ruleName = "🔥 策略 C (客主力獨贏)"; calculatedEdge = vEdge; margin = vEdge; stratKey = 'C'; awayBetPlaced = true; }
+                if (!awayBetPlaced) { if (vModel >= 0.40 && vModel <= 0.50 && vSpreadLine === 1.5 && vSpreadOdds >= -200 && vSpreadOdds <= -110) { signalType = 'Away'; targetTeam = visitor; targetType = 'Away'; ruleName = "🛡️ 策略 D (客受讓保險)"; calculatedEdge = 0; margin = 0; stratKey = 'D'; awayBetPlaced = true; } }
             }
         }
-
-        // 第二階段：主場對位與禁區過濾
         let homeBetPlaced = false;
         if (!awayBetPlaced && hModel < 0.65) {
             if (!( (month === 7 || month === 10) && hModel >= 0.50 )) {
-                if (hModel >= 0.45 && hModel <= 0.50 && hML >= -110 && hML <= 110) {
-                    signalType = 'Home'; targetTeam = home; targetType = 'Home'; 
-                    ruleName = "🚀 策略 B (主場五五波)"; calculatedEdge = hEdge; margin = hEdge; stratKey = 'B';
-                    homeBetPlaced = true;
-                }
-
-                if (!homeBetPlaced) {
-                    if (hModel >= 0.35 && hModel <= 0.40 && hML >= 110 && hML <= 300) {
-                        signalType = 'Home'; targetTeam = home; targetType = 'Home'; 
-                        ruleName = "💥 策略 A (主高賠突擊)"; calculatedEdge = hEdge; margin = hEdge; stratKey = 'A';
-                        homeBetPlaced = true;
-                    }
-                }
+                if (hModel >= 0.45 && hModel <= 0.50 && hML >= -110 && hML <= 110) { signalType = 'Home'; targetTeam = home; targetType = 'Home'; ruleName = "🚀 策略 B (主場五五波)"; calculatedEdge = hEdge; margin = hEdge; stratKey = 'B'; homeBetPlaced = true; }
+                if (!homeBetPlaced) { if (hModel >= 0.35 && hModel <= 0.40 && hML >= 110 && hML <= 300) { signalType = 'Home'; targetTeam = home; targetType = 'Home'; ruleName = "💥 策略 A (主高賠突擊)"; calculatedEdge = hEdge; margin = hEdge; stratKey = 'A'; homeBetPlaced = true; } }
             }
         }
-
-        if (!signalType) {
-            return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
-        }
-
-        // 第五階段：綜合注碼配置 (極限化動態矩陣)
-        let tier = 'Unclassified';
-        let isMargin_8_10 = (margin >= 0.08 && margin <= 0.10);
-        let isMonthUnderdog = ((month === 7 || month === 10) && ((stratKey === 'C' || stratKey === 'D') ? vModel < 0.50 : hModel < 0.50));
-
-        if (isMargin_8_10 || isMonthUnderdog) {
-            tier = 'S';
-            ruleName = '🌟[S級重注] ' + ruleName;
-        } else {
-            tier = stratKey;
-        }
-
-        let pct = 0;
-        if (tier === 'S') pct = 0.03625;                 
-        else if (stratKey === 'C' || stratKey === 'B') pct = 0.02175; 
-        else if (stratKey === 'D') pct = 0.01450;                 
-        else if (stratKey === 'A') pct = 0.00725;                 
-
-        let betSize = bankroll * pct;
-
-        // 計算精準的下注類型文字與真實賠率
-        let betTypeStr = (stratKey === 'D') ? '讓分+1.5' : '獨贏ML';
-        let recOdds = (stratKey === 'D') ? vSpreadOdds : (targetType === 'Home' ? hML : vML);
-        let recPrice = getImpliedProb(recOdds);
-
-        return {
-            signal: (targetType === 'Home' ? '[主] ' : '[客] ') + ruleName,
-            stake: `[${betTypeStr}] $${betSize.toFixed(1)} (${(pct * 100).toFixed(2)}%)`,
-            color: "buy",
-            highlightTarget: targetType === 'Home' ? 'home' : 'visitor',
-            edge: calculatedEdge,
-            betTypeStr: betTypeStr,
-            recPrice: recPrice
-        };
+        if (!signalType) { return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 }; }
+        let tier = 'Unclassified'; let isMargin_8_10 = (margin >= 0.08 && margin <= 0.10); let isMonthUnderdog = ((month === 7 || month === 10) && ((stratKey === 'C' || stratKey === 'D') ? vModel < 0.50 : hModel < 0.50));
+        if (isMargin_8_10 || isMonthUnderdog) { tier = 'S'; ruleName = '🌟[S級重注] ' + ruleName; } else { tier = stratKey; }
+        let pct = 0; if (tier === 'S') pct = 0.03625; else if (stratKey === 'C' || stratKey === 'B') pct = 0.02175; else if (stratKey === 'D') pct = 0.01450; else if (stratKey === 'A') pct = 0.00725;                 
+        let betSize = bankroll * pct; let betTypeStr = (stratKey === 'D') ? '讓分+1.5' : '獨贏ML'; let recOdds = (stratKey === 'D') ? vSpreadOdds : (targetType === 'Home' ? hML : vML); let recPrice = getImpliedProb(recOdds);
+        return { signal: (targetType === 'Home' ? '[主] ' : '[客] ') + ruleName, stake: `[${betTypeStr}] $${betSize.toFixed(1)} (${(pct * 100).toFixed(2)}%)`, color: "buy", highlightTarget: targetType === 'Home' ? 'home' : 'visitor', edge: calculatedEdge, betTypeStr: betTypeStr, recPrice: recPrice };
     }
 
     function calculateNhlStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, bankroll) {
@@ -637,102 +561,39 @@
         return { signal: (result.type==='Home'?'[主] ':'[客] ') + result.ruleName, stake: `$${finalAmt.toFixed(1)} (${(finalStakePct * 100).toFixed(2)}%)`, color: "buy", highlightTarget: result.type === 'Home' ? 'home' : 'visitor', edge: result.edge };
     }
 
-    // ==========================================
-    // 1. 賠率解析模組：強制永遠只抓取「第一組」賠率 (賽前最真實數據)
-    // ==========================================
     function parseOdds(oddsStr) {
         if (!oddsStr) return { away: null, home: null }; 
-        const str = oddsStr.toString(); 
-        const matches = str.match(/[+-]\d+/g); 
-        
+        const str = oddsStr.toString(); const matches = str.match(/[+-]\d+/g); 
         if (!matches || matches.length < 2) return { away: null, home: null };
         return { away: parseInt(matches[0]), home: parseInt(matches[1]) };
     }
 
-    // ==========================================
-    // 2. NFL 核心量化決策模組
-    // ==========================================
     function evaluateNFLStrategy(dateObj, visitor, home, vModel, hModel, vPrice, hPrice, vDecOdds, hDecOdds) {
-        const vEdge = vModel - vPrice;
-        const hEdge = hModel - hPrice;
-        const month = dateObj.getUTCMonth(); 
-        
+        const vEdge = vModel - vPrice; const hEdge = hModel - hPrice; const month = dateObj.getUTCMonth(); 
         let result = { type: null, ruleName: null, target: null, trueProb: 0, edge: 0, price: 0 };
-
-        if (vModel >= 0.65 && vEdge >= 0.03) {
-            result = { type: 'Away', target: visitor, ruleName: '🚀 Core Away Fav (>65%)', edge: vEdge, price: vPrice, trueProb: vModel };
-        } else if (hModel >= 0.65 && hEdge >= 0.06) {
-            result = { type: 'Home', target: home, ruleName: '🏰 Core Home Fav (>65%)', edge: hEdge, price: hPrice, trueProb: hModel };
-        } else if (vModel >= 0.35 && vModel < 0.50 && vEdge >= 0.04 && vEdge < 0.07) {
-            result = { type: 'Away', target: visitor, ruleName: '💎 Away Dog Sweet (35-50%)', edge: vEdge, price: vPrice, trueProb: vModel };
-        } else if (hModel >= 0.50 && hModel < 0.60 && hEdge >= 0.04 && hEdge < 0.06) {
-            result = { type: 'Home', target: home, ruleName: '🔥 Home Fav Sweet (50-60%)', edge: hEdge, price: hPrice, trueProb: hModel };
-        } else if (vModel >= 0.70 && vModel < 0.85 && vEdge >= 0.02 && vEdge < 0.08) {
-            result = { type: 'Away', target: visitor, ruleName: '👑 Elite Away Discount (70-85%)', edge: vEdge, price: vPrice, trueProb: vModel };
-        } else {
-            return null;
-        }
-
+        if (vModel >= 0.65 && vEdge >= 0.03) { result = { type: 'Away', target: visitor, ruleName: '🚀 Core Away Fav (>65%)', edge: vEdge, price: vPrice, trueProb: vModel }; } else if (hModel >= 0.65 && hEdge >= 0.06) { result = { type: 'Home', target: home, ruleName: '🏰 Core Home Fav (>65%)', edge: hEdge, price: hPrice, trueProb: hModel }; } else if (vModel >= 0.35 && vModel < 0.50 && vEdge >= 0.04 && vEdge < 0.07) { result = { type: 'Away', target: visitor, ruleName: '💎 Away Dog Sweet (35-50%)', edge: vEdge, price: vPrice, trueProb: vModel }; } else if (hModel >= 0.50 && hModel < 0.60 && hEdge >= 0.04 && hEdge < 0.06) { result = { type: 'Home', target: home, ruleName: '🔥 Home Fav Sweet (50-60%)', edge: hEdge, price: hPrice, trueProb: hModel }; } else if (vModel >= 0.70 && vModel < 0.85 && vEdge >= 0.02 && vEdge < 0.08) { result = { type: 'Away', target: visitor, ruleName: '👑 Elite Away Discount (70-85%)', edge: vEdge, price: vPrice, trueProb: vModel }; } else { return null; }
         const b = result.type === 'Home' ? (hDecOdds - 1) : (vDecOdds - 1);
         const kelly_f = result.trueProb - ((1 - result.trueProb) / b);
-        
         const isPlayoff = (month === 0 || month === 1);
-        
-        const kelly_mult = isPlayoff ? 0.40 : 0.81; 
-        const max_cap = isPlayoff ? 0.06 : 0.12;    
-        
-        const stakePct = kelly_f * kelly_mult;
-        result.stakePct = Math.max(0.01, Math.min(stakePct, max_cap)); 
-        
+        const kelly_mult = isPlayoff ? 0.40 : 0.81; const max_cap = isPlayoff ? 0.06 : 0.12;    
+        const stakePct = kelly_f * kelly_mult; result.stakePct = Math.max(0.01, Math.min(stakePct, max_cap)); 
         if (result.stakePct <= 0 || isNaN(result.stakePct)) return null;
-
         return result; 
     }
 
-    // ==========================================
-    // 3. 橋接轉換函數 (替換原版的 calculateNflStrategy)
-    // ==========================================
     function calculateNflStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, bankroll) {
         if (vML === null || hML === null || !utcDate) return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
-        
-        const vModel = vModelProb / 100.0; 
-        const hModel = hModelProb / 100.0;
-        const vPrice = getImpliedProb(vML); 
-        const hPrice = getImpliedProb(hML);
-        
-        // 將美式賠率轉換為十進位賠率以供 Kelly 公式計算
-        const vDecOdds = vML > 0 ? (vML / 100) + 1 : (100 / Math.abs(vML)) + 1;
-        const hDecOdds = hML > 0 ? (hML / 100) + 1 : (100 / Math.abs(hML)) + 1;
-
+        const vModel = vModelProb / 100.0; const hModel = hModelProb / 100.0; const vPrice = getImpliedProb(vML); const hPrice = getImpliedProb(hML);
+        const vDecOdds = vML > 0 ? (vML / 100) + 1 : (100 / Math.abs(vML)) + 1; const hDecOdds = hML > 0 ? (hML / 100) + 1 : (100 / Math.abs(hML)) + 1;
         const evalResult = evaluateNFLStrategy(utcDate, visitor, home, vModel, hModel, vPrice, hPrice, vDecOdds, hDecOdds);
-
-        if (!evalResult) {
-            return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 };
-        }
-
-        // 對應回 UI 所需的變數格式
+        if (!evalResult) { return { signal: "-", stake: "-", color: "none", highlightTarget: null, edge: 0 }; }
         const finalAmt = evalResult.stakePct * bankroll;
-        
-        return { 
-            signal: (evalResult.type === 'Home' ? '[主] ' : '[客] ') + evalResult.ruleName, 
-            stake: `[獨贏ML] $${finalAmt.toFixed(1)} (${(evalResult.stakePct * 100).toFixed(2)}%)`, 
-            color: "buy", 
-            highlightTarget: evalResult.type === 'Home' ? 'home' : 'visitor', 
-            edge: evalResult.edge,
-            betTypeStr: '獨贏ML',
-            recPrice: evalResult.price
-        };
+        return { signal: (evalResult.type === 'Home' ? '[主] ' : '[客] ') + evalResult.ruleName, stake: `[獨贏ML] $${finalAmt.toFixed(1)} (${(evalResult.stakePct * 100).toFixed(2)}%)`, color: "buy", highlightTarget: evalResult.type === 'Home' ? 'home' : 'visitor', edge: evalResult.edge, betTypeStr: '獨贏ML', recPrice: evalResult.price };
     }
 
     function calculateNcaafStrategy(utcDate, visitor, home, vModelProb, hModelProb, vML, hML, bankroll) {
         if (vML === null || hML === null) return { signal: "-", stake: "-", color: "none", highlightTarget: null };
-        const vModel = vModelProb / 100.0; const hModel = hModelProb / 100.0;
-        const vPrice = getImpliedProb(vML); const hPrice = getImpliedProb(hML);
-        const vEdge = vModel - vPrice; const hEdge = hModel - hPrice;
-        const month = utcDate.getUTCMonth(); 
-        const day = utcDate.getUTCDay(); 
-        const isWeekend = (day === 0 || day === 6);
-        let action = { name: null, target: null, type: null, p: 0, c: 0, edge: 0 }; let isTrap = false;
+        const vModel = vModelProb / 100.0; const hModel = hModelProb / 100.0; const vPrice = getImpliedProb(vML); const hPrice = getImpliedProb(hML); const vEdge = vModel - vPrice; const hEdge = hModel - hPrice; const month = utcDate.getUTCMonth(); const day = utcDate.getUTCDay(); const isWeekend = (day === 0 || day === 6); let action = { name: null, target: null, type: null, p: 0, c: 0, edge: 0 }; let isTrap = false;
         if (vEdge > 0.15) { if (month !== 8 && month !== 11) { if ((hML < -200 || hML > 100) && hPrice < 0.60) { action = { name: "🪤 Fade_Trap", target: home, type: 'Home', p: 0.60, c: hPrice, edge: hEdge }; isTrap = true; } } }
         if ((vEdge > 0.15 || hEdge > 0.15) && !isTrap) return { signal: "High Edge Skip", stake: "-", color: "none", highlightTarget: null };
         const allowedDays = [0, 2, 6];
@@ -823,7 +684,6 @@
             let dd = peak - runningPnL; if (dd > maxDrawdown) maxDrawdown = dd;
         });
 
-        // 新增：目前回撤
         let currentDrawdown = peak - runningPnL;
 
         const winRate = totalBets > 0 ? (wins / totalBets) * 100 : 0;
@@ -851,7 +711,6 @@
         roiEl.className = 'stat-value ' + (roi >= 0 ? 'pos' : 'neg');
         
         document.getElementById('statDrawdown').textContent = "-" + ddPercent.toFixed(2) + "%";
-        // 更新目前回撤 UI
         document.getElementById('statCurrentDrawdown').textContent = "目前回撤: -" + currentDdPercent.toFixed(2) + "%";
     }
 
@@ -869,21 +728,13 @@
         historyList.forEach(b => {
             const p = b.price; 
             if (p > 0.5) { 
-                buckets['1.0-1.99'].total++; 
-                buckets['1.0-1.99'].pnl += b.profit;
-                if(b.profit > 0) buckets['1.0-1.99'].wins++; 
+                buckets['1.0-1.99'].total++; buckets['1.0-1.99'].pnl += b.profit; if(b.profit > 0) buckets['1.0-1.99'].wins++; 
             } else if (p > 0.3333) { 
-                buckets['2.0-2.99'].total++; 
-                buckets['2.0-2.99'].pnl += b.profit;
-                if(b.profit > 0) buckets['2.0-2.99'].wins++; 
+                buckets['2.0-2.99'].total++; buckets['2.0-2.99'].pnl += b.profit; if(b.profit > 0) buckets['2.0-2.99'].wins++; 
             } else if (p > 0.25) { 
-                buckets['3.0-3.99'].total++; 
-                buckets['3.0-3.99'].pnl += b.profit;
-                if(b.profit > 0) buckets['3.0-3.99'].wins++; 
+                buckets['3.0-3.99'].total++; buckets['3.0-3.99'].pnl += b.profit; if(b.profit > 0) buckets['3.0-3.99'].wins++; 
             } else { 
-                buckets['4.0+'].total++; 
-                buckets['4.0+'].pnl += b.profit;
-                if(b.profit > 0) buckets['4.0+'].wins++; 
+                buckets['4.0+'].total++; buckets['4.0+'].pnl += b.profit; if(b.profit > 0) buckets['4.0+'].wins++; 
             }
         });
 
@@ -903,63 +754,17 @@
             data: { 
                 labels: labels, 
                 datasets: [
-                    { 
-                        label: '勝率 (%)', 
-                        data: winRates, 
-                        type: 'line', 
-                        borderColor: 'rgba(67, 97, 238, 1)', 
-                        backgroundColor: 'rgba(67, 97, 238, 0.2)',
-                        borderWidth: 2, 
-                        tension: 0.3,
-                        pointBackgroundColor: 'rgba(67, 97, 238, 1)',
-                        yAxisID: 'y' 
-                    },
-                    {
-                        label: '盈虧 (P&L)',
-                        data: pnls,
-                        type: 'bar', 
-                        backgroundColor: pnlColors,
-                        borderColor: pnlBorders,
-                        borderWidth: 1,
-                        yAxisID: 'y1' 
-                    }
+                    { label: '勝率 (%)', data: winRates, type: 'line', borderColor: 'rgba(67, 97, 238, 1)', backgroundColor: 'rgba(67, 97, 238, 0.2)', borderWidth: 2, tension: 0.3, pointBackgroundColor: 'rgba(67, 97, 238, 1)', yAxisID: 'y' },
+                    { label: '盈虧 (P&L)', data: pnls, type: 'bar', backgroundColor: pnlColors, borderColor: pnlBorders, borderWidth: 1, yAxisID: 'y1' }
                 ] 
             }, 
             options: { 
-                responsive: true, 
-                maintainAspectRatio: false, 
+                responsive: true, maintainAspectRatio: false, 
                 scales: { 
-                    y: { 
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
-                        beginAtZero: true, 
-                        max: 100,
-                        title: { display: true, text: '勝率 (%)', color: '#4361ee' }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        beginAtZero: true,
-                        grid: { drawOnChartArea: false }, 
-                        title: { display: true, text: '總盈虧 ($)', color: '#334155' }
-                    }
+                    y: { type: 'linear', display: true, position: 'left', beginAtZero: true, max: 100, title: { display: true, text: '勝率 (%)', color: '#4361ee' } },
+                    y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: '總盈虧 ($)', color: '#334155' } }
                 }, 
-                plugins: { 
-                    tooltip: { 
-                        callbacks: { 
-                            label: function(context) { 
-                                const idx = context.dataIndex; 
-                                if (context.datasetIndex === 0) { 
-                                    return `勝率: ${context.parsed.y.toFixed(1)}% (${buckets[labels[idx]].wins}/${counts[idx]})`; 
-                                } else { 
-                                    return `盈虧: ${context.parsed.y >= 0 ? '+' : ''}$${context.parsed.y.toFixed(2)}`;
-                                }
-                            } 
-                        } 
-                    } 
-                } 
+                plugins: { tooltip: { callbacks: { label: function(context) { const idx = context.dataIndex; if (context.datasetIndex === 0) { return `勝率: ${context.parsed.y.toFixed(1)}% (${buckets[labels[idx]].wins}/${counts[idx]})`; } else { return `盈虧: ${context.parsed.y >= 0 ? '+' : ''}$${context.parsed.y.toFixed(2)}`; } } } } } 
             } 
         });
 
@@ -970,13 +775,7 @@
             const pnlValue = buckets[k].pnl;
             const pnlColor = pnlValue > 0 ? '#16a34a' : (pnlValue < 0 ? '#dc2626' : '#64748b');
             const pnlText = (pnlValue > 0 ? '+' : '') + '$' + pnlValue.toFixed(2);
-
-            row.innerHTML = `
-                <td>${k}</td>
-                <td>${buckets[k].wins}/${buckets[k].total - buckets[k].wins}</td>
-                <td style="font-weight:bold; color:${parseFloat(wr)>=50?'#16a34a':'#dc2626'}">${wr}%</td>
-                <td style="font-weight:bold; color:${pnlColor}">${pnlText}</td>
-            `; 
+            row.innerHTML = `<td>${k}</td><td>${buckets[k].wins}/${buckets[k].total - buckets[k].wins}</td><td style="font-weight:bold; color:${parseFloat(wr)>=50?'#16a34a':'#dc2626'}">${wr}%</td><td style="font-weight:bold; color:${pnlColor}">${pnlText}</td>`; 
             tbody.appendChild(row); 
         });
         document.getElementById('statsModal').style.display = 'flex';
@@ -1023,13 +822,10 @@
         saveBettingData(); closeModal('fundModal'); alert('資金調整完成');
     }
 
-    // 修改版：純淨盈虧曲線
     function displayCapitalChart() {
-        // 過濾掉 'adjustment' (出金/入金)，只計算真實盈虧
         const historyList = bettingData.closedBets.filter(b => b.sport === currentSport && b.result !== 'adjustment').sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
-        
         const labels = ['Start'];
-        const data = [0]; // 從 0 盈虧開始
+        const data = [0]; 
         let cumPnL = 0;
 
         historyList.forEach((b, index) => {
@@ -1044,7 +840,6 @@
         const ctx = document.getElementById('myChart').getContext('2d'); 
         if (myChart) myChart.destroy();
 
-        // 依據最終盈虧決定圖表顏色
         const isPositive = cumPnL >= 0;
         const lineColor = isPositive ? '#16a34a' : '#dc2626';
         const gradStart = isPositive ? 'rgba(22, 163, 74, 0.4)' : 'rgba(220, 38, 38, 0.4)';
@@ -1057,27 +852,13 @@
             type: 'line', 
             data: { 
                 labels: labels, 
-                datasets: [{ 
-                    label: '累計淨盈虧 (P&L)', 
-                    data: data, 
-                    borderColor: lineColor, 
-                    backgroundColor: gradient, 
-                    borderWidth: 2, 
-                    fill: true, 
-                    tension: 0.2, 
-                    pointRadius: 2 
-                }] 
+                datasets: [{ label: '累計淨盈虧 (P&L)', data: data, borderColor: lineColor, backgroundColor: gradient, borderWidth: 2, fill: true, tension: 0.2, pointRadius: 2 }] 
             }, 
-            options: { 
-                responsive: true, 
-                plugins: { legend: { display: false } }, 
-                scales: { y: { beginAtZero: false } } 
-            } 
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } } 
         });
         document.getElementById('chartSection').scrollIntoView({ behavior: 'smooth' });
     }
     
-    // 新增：匯出圖片
     async function exportToJPG() {
         displayCapitalChart();
         showToast("📸 正在為您產生戰績報表，請稍候...");
@@ -1161,9 +942,66 @@
 
     function setHistoryFilter(type) { historyFilter = type; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); if (type === 'all') document.getElementById('filterAll').classList.add('active'); if (type === 'settled') document.getElementById('filterSettled').classList.add('active'); if (type === 'sold') document.getElementById('filterSold').classList.add('active'); renderPortfolio(); }
     
-    function setOddsMode(mode) { oddsMode = mode; localStorage.setItem('pms_odds_mode', mode); document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active')); if(mode === 'polymarket') document.getElementById('btnModePoly').classList.add('active'); if(mode === 'american') document.getElementById('btnModeAmer').classList.add('active'); if(mode === 'decimal') document.getElementById('btnModeDec').classList.add('active'); const input = document.getElementById('modalPrice'); const internalPrice = parseFloat(document.getElementById('internalPrice').value) || 0.5; if (mode === 'polymarket') { document.getElementById('priceLabel').textContent = "對應買入價格 (Price):"; input.step = "0.01"; input.value = internalPrice.toFixed(2); } else if (mode === 'american') { document.getElementById('priceLabel').textContent = "美式賠率 (Odds):"; input.step = "1"; input.value = polyToAmerican(internalPrice); } else if (mode === 'decimal') { document.getElementById('priceLabel').textContent = "歐/英賠率 (Decimal):"; input.step = "0.01"; input.value = polyToDecimal(internalPrice); } updateBetCalc(); }
+    function setOddsMode(mode) { 
+        oddsMode = mode; 
+        localStorage.setItem('pms_odds_mode', mode); 
+        document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active')); 
+        if(mode === 'polymarket') document.getElementById('btnModePoly').classList.add('active'); 
+        if(mode === 'american') document.getElementById('btnModeAmer').classList.add('active'); 
+        if(mode === 'decimal') document.getElementById('btnModeDec').classList.add('active'); 
+        
+        const input = document.getElementById('modalPrice'); 
+        const internalPrice = parseFloat(document.getElementById('internalPrice').value) || 0.5; 
+        
+        if (mode === 'polymarket') { 
+            document.getElementById('priceLabel').textContent = "對應買入價格 (Price):"; 
+            input.step = "0.01"; 
+            input.value = internalPrice.toFixed(2); 
+        } else if (mode === 'american') { 
+            document.getElementById('priceLabel').textContent = "美式賠率 (Odds):"; 
+            input.step = "1"; 
+            input.value = polyToAmerican(internalPrice); 
+        } else if (mode === 'decimal') { 
+            document.getElementById('priceLabel').textContent = "歐/英賠率 (Decimal):"; 
+            input.step = "0.01"; 
+            input.value = polyToDecimal(internalPrice); 
+        } 
+        updateBetCalc(); 
+    }
     
-    function updateBetCalc() { const stake = parseFloat(document.getElementById('modalStake').value) || 0; const rawInput = parseFloat(document.getElementById('modalPrice').value); let finalPrice = 0.5; if (!isNaN(rawInput)) { if (oddsMode === 'polymarket') finalPrice = rawInput; else if (oddsMode === 'american') finalPrice = americanToPoly(rawInput); else if (oddsMode === 'decimal') finalPrice = decimalToPoly(rawInput); } if (finalPrice <= 0) finalPrice = 0.01; if (finalPrice >= 1) finalPrice = 0.99; document.getElementById('internalPrice').value = finalPrice; const shares = stake / finalPrice; const profit = shares - stake; document.getElementById('calcShares').textContent = shares.toFixed(2); document.getElementById('calcProfit').textContent = '$' + profit.toFixed(2); }
+    // ==========================================
+    // 修改：買單運算 - 依據 oddsMode 自動開關手續費
+    // ==========================================
+    function updateBetCalc() { 
+        const stake = parseFloat(document.getElementById('modalStake').value) || 0; 
+        const rawInput = parseFloat(document.getElementById('modalPrice').value); 
+        let finalPrice = 0.5; 
+        if (!isNaN(rawInput)) { 
+            if (oddsMode === 'polymarket') finalPrice = rawInput; 
+            else if (oddsMode === 'american') finalPrice = americanToPoly(rawInput); 
+            else if (oddsMode === 'decimal') finalPrice = decimalToPoly(rawInput); 
+        } 
+        if (finalPrice <= 0) finalPrice = 0.01; 
+        if (finalPrice >= 1) finalPrice = 0.99; 
+        document.getElementById('internalPrice').value = finalPrice; 
+        
+        const intended_shares = stake / finalPrice; 
+        
+        // 【核心邏輯】只有在 polymarket 模式才收手續費
+        let fee_usdc = 0;
+        if (oddsMode === 'polymarket') {
+            fee_usdc = calculatePolyFee(intended_shares, finalPrice);
+        }
+
+        const fee_shares = fee_usdc / finalPrice;
+        const actual_shares = intended_shares - fee_shares;
+        
+        const profit = actual_shares * 1.00 - stake; 
+        
+        document.getElementById('calcShares').textContent = actual_shares.toFixed(2); 
+        document.getElementById('calcFee').textContent = '$' + fee_usdc.toFixed(4);
+        document.getElementById('calcProfit').textContent = '$' + profit.toFixed(2); 
+    }
     
     function openBetModal(team, stake, price, visitor, home, targetType, betTypeStr) { 
         document.getElementById('modalSport').value = currentSport; 
@@ -1179,13 +1017,147 @@
     }
     
     function setMaxShares() { const betId = document.getElementById('sellBetId').value; const bet = bettingData.openBets.find(b => b.id == betId); if(bet) { document.getElementById('sellShares').value = bet.shares; document.getElementById('sellShares').dispatchEvent(new Event('input')); } }
-    function openSellModal(betId) { const bet = bettingData.openBets.find(b => b.id === betId); if(!bet) return; document.getElementById('sellBetId').value = betId; document.getElementById('sellTeamDisplay').value = bet.team; document.getElementById('maxShares').textContent = bet.shares.toFixed(2); document.getElementById('sellShares').value = bet.shares.toFixed(2); document.getElementById('sellPrice').value = 0.50; const updateSellCalc = () => { const shares = parseFloat(document.getElementById('sellShares').value) || 0; const price = parseFloat(document.getElementById('sellPrice').value) || 0; const payout = shares * price; const costBasis = shares * bet.price; const pnl = payout - costBasis; document.getElementById('calcSellPayout').textContent = '$' + payout.toFixed(2); const pnlSpan = document.getElementById('calcSellPnL'); pnlSpan.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2); pnlSpan.style.color = pnl >= 0 ? '#16a34a' : '#dc2626'; }; document.getElementById('sellShares').oninput = updateSellCalc; document.getElementById('sellPrice').oninput = updateSellCalc; updateSellCalc(); document.getElementById('sellModal').style.display = 'flex'; }
-    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-    function confirmBet() { const sport = document.getElementById('modalSport').value; const team = document.getElementById('modalTeam').value; const teamDisplay = document.getElementById('modalTeamDisplay').value; const stake = parseFloat(document.getElementById('modalStake').value); const price = parseFloat(document.getElementById('internalPrice').value); if (!stake || !price || price <= 0 || price >= 1) { alert("請輸入有效金額與價格"); return; } if (bettingData.bankrolls[sport] < stake) { alert("資金不足！"); return; } bettingData.bankrolls[sport] -= stake; const shares = stake / price; const bet = { id: Date.now(), sport: sport, date: new Date().toLocaleDateString(), team: teamDisplay, stake: stake, price: price, shares: shares, timestamp: Date.now() }; bettingData.openBets.push(bet); saveBettingData(); closeModal('betModal'); alert("下注成功！"); }
-    function confirmSell() { const betId = parseInt(document.getElementById('sellBetId').value); const sellShares = parseFloat(document.getElementById('sellShares').value); const sellPrice = parseFloat(document.getElementById('sellPrice').value); const betIdx = bettingData.openBets.findIndex(b => b.id === betId); if(betIdx === -1) return; const bet = bettingData.openBets[betIdx]; if(sellShares > bet.shares + 0.0001) { alert("賣出數量超過持有數量！"); return; } const payout = sellShares * sellPrice; const costBasis = sellShares * bet.price; const profit = payout - costBasis; bettingData.bankrolls[bet.sport] += payout; const historyRecord = { date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team + (sellShares < bet.shares - 0.0001 ? " (Partial)" : ""), stake: costBasis, price: sellPrice, result: "sold", profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() }; bettingData.closedBets.push(historyRecord); if(Math.abs(sellShares - bet.shares) < 0.0001) { bettingData.openBets.splice(betIdx, 1); } else { bet.shares -= sellShares; bet.stake -= costBasis; } saveBettingData(); closeModal('sellModal'); }
-    function settleBet(id, result) { const idx = bettingData.openBets.findIndex(b => b.id === id); if (idx === -1) return; const bet = bettingData.openBets[idx]; let profit = 0; let payout = 0; if (result === 'win') { payout = bet.shares * 1.00; profit = payout - bet.stake; bettingData.bankrolls[bet.sport] += payout; } else { profit = -bet.stake; } const closedBet = { date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team, stake: bet.stake, price: bet.price, result: result, profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() }; bettingData.closedBets.push(closedBet); bettingData.openBets.splice(idx, 1); saveBettingData(); }
     
-    // **核心渲染保留**
+    // ==========================================
+    // 修改：賣單運算 - 讀取訂單建立時的市場屬性來決定是否收費
+    // ==========================================
+    function openSellModal(betId) { 
+        const bet = bettingData.openBets.find(b => b.id === betId); 
+        if(!bet) return; 
+        document.getElementById('sellBetId').value = betId; 
+        document.getElementById('sellTeamDisplay').value = bet.team; 
+        document.getElementById('maxShares').textContent = bet.shares.toFixed(2); 
+        document.getElementById('sellShares').value = bet.shares.toFixed(2); 
+        document.getElementById('sellPrice').value = 0.50; 
+        
+        const updateSellCalc = () => { 
+            const shares = parseFloat(document.getElementById('sellShares').value) || 0; 
+            const price = parseFloat(document.getElementById('sellPrice').value) || 0; 
+            
+            // 【核心邏輯】讀取訂單存下的 oddsMode，若是舊單沒紀錄則依目前介面為主
+            let fee_usdc = 0;
+            if (bet.oddsMode === 'polymarket' || (!bet.oddsMode && oddsMode === 'polymarket')) {
+                fee_usdc = calculatePolyFee(shares, price);
+            }
+
+            const gross_payout = shares * price;
+            const net_payout = gross_payout - fee_usdc;
+            
+            const costBasis = (shares / bet.shares) * bet.stake; 
+            const pnl = net_payout - costBasis; 
+            
+            document.getElementById('calcSellFee').textContent = '$' + fee_usdc.toFixed(4);
+            document.getElementById('calcSellPayout').textContent = '$' + net_payout.toFixed(2); 
+            const pnlSpan = document.getElementById('calcSellPnL'); 
+            pnlSpan.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2); 
+            pnlSpan.style.color = pnl >= 0 ? '#16a34a' : '#dc2626'; 
+        }; 
+        
+        document.getElementById('sellShares').oninput = updateSellCalc; 
+        document.getElementById('sellPrice').oninput = updateSellCalc; 
+        updateSellCalc(); 
+        document.getElementById('sellModal').style.display = 'flex'; 
+    }
+    
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+    
+    // ==========================================
+    // 修改：確認買單 - 寫入當前 oddsMode 到歷史紀錄中
+    // ==========================================
+    function confirmBet() { 
+        const sport = document.getElementById('modalSport').value; 
+        const team = document.getElementById('modalTeam').value; 
+        const teamDisplay = document.getElementById('modalTeamDisplay').value; 
+        const stake = parseFloat(document.getElementById('modalStake').value); 
+        const price = parseFloat(document.getElementById('internalPrice').value); 
+        
+        if (!stake || !price || price <= 0 || price >= 1) { alert("請輸入有效金額與價格"); return; } 
+        if (bettingData.bankrolls[sport] < stake) { alert("資金不足！"); return; } 
+        
+        const intended_shares = stake / price;
+        
+        let fee_usdc = 0;
+        if (oddsMode === 'polymarket') {
+            fee_usdc = calculatePolyFee(intended_shares, price);
+        }
+
+        const actual_shares = intended_shares - (fee_usdc / price);
+
+        bettingData.bankrolls[sport] -= stake; 
+        
+        const bet = { 
+            id: Date.now(), sport: sport, date: new Date().toLocaleDateString(), 
+            team: teamDisplay, stake: stake, price: price, shares: actual_shares, fee: fee_usdc, 
+            oddsMode: oddsMode, // 記錄這張單屬於哪個市場
+            timestamp: Date.now() 
+        }; 
+        
+        bettingData.openBets.push(bet); 
+        saveBettingData(); 
+        closeModal('betModal'); 
+        alert(oddsMode === 'polymarket' ? "下注成功！(已自動扣除對應手續費)" : "下注成功！(傳統莊家免額外手續費)"); 
+    }
+    
+    function confirmSell() { 
+        const betId = parseInt(document.getElementById('sellBetId').value); 
+        const sellShares = parseFloat(document.getElementById('sellShares').value); 
+        const sellPrice = parseFloat(document.getElementById('sellPrice').value); 
+        const betIdx = bettingData.openBets.findIndex(b => b.id === betId); 
+        if(betIdx === -1) return; 
+        const bet = bettingData.openBets[betIdx]; 
+        
+        if(sellShares > bet.shares + 0.0001) { alert("賣出數量超過持有數量！"); return; } 
+        
+        let fee_usdc = 0;
+        if (bet.oddsMode === 'polymarket' || (!bet.oddsMode && oddsMode === 'polymarket')) {
+            fee_usdc = calculatePolyFee(sellShares, sellPrice);
+        }
+
+        const gross_payout = sellShares * sellPrice;
+        const net_payout = gross_payout - fee_usdc;
+        
+        const costBasis = (sellShares / bet.shares) * bet.stake; 
+        const profit = net_payout - costBasis; 
+        
+        bettingData.bankrolls[bet.sport] += net_payout; 
+        
+        const historyRecord = { 
+            date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team + (sellShares < bet.shares - 0.0001 ? " (Partial)" : ""), 
+            stake: costBasis, price: sellPrice, result: "sold", profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() 
+        }; 
+        
+        bettingData.closedBets.push(historyRecord); 
+        
+        if(Math.abs(sellShares - bet.shares) < 0.0001) { 
+            bettingData.openBets.splice(betIdx, 1); 
+        } else { 
+            bet.shares -= sellShares; 
+            bet.stake -= costBasis; 
+        } 
+        saveBettingData(); 
+        closeModal('sellModal'); 
+    }
+    
+    function settleBet(id, result) { 
+        const idx = bettingData.openBets.findIndex(b => b.id === id); 
+        if (idx === -1) return; 
+        const bet = bettingData.openBets[idx]; 
+        let profit = 0; let payout = 0; 
+        
+        if (result === 'win') { 
+            payout = bet.shares * 1.00; 
+            profit = payout - bet.stake; 
+            bettingData.bankrolls[bet.sport] += payout; 
+        } else { 
+            profit = -bet.stake; 
+        } 
+        
+        const closedBet = { date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team, stake: bet.stake, price: bet.price, result: result, profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() }; 
+        bettingData.closedBets.push(closedBet); 
+        bettingData.openBets.splice(idx, 1); 
+        saveBettingData(); 
+    }
+    
     function renderPortfolio() { 
         const openBody = document.getElementById('openBetsBody'); openBody.innerHTML = ''; 
         const currentOpenBets = bettingData.openBets.filter(b => b.sport === currentSport); 
@@ -1203,7 +1175,6 @@
 
     let progressInterval = null;
 
-    // **API 抓取保留**
     async function fetchData() {
         currentFetchId++; 
         const fetchId = currentFetchId; 
