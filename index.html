@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>量化交易終端 v13.6 (Uncapped MLB 極限注碼 + 盤口精準標示版)</title>
+    <title>量化交易終端 v13.6.1 (Uncapped MLB 極限注碼 + 盤口精準標示版)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         :root { --primary-color: #4361ee; --success-bg: #dcfce7; --success-text: #166534; --warning-bg: #fef9c3; --warning-text: #854d0e; --danger-text: #dc2626; --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background-color: #f1f5f9; color: #334155; padding-bottom: 60px; }
@@ -71,6 +72,8 @@
         button:hover { background-color: #304ffe; }
         button.secondary { background-color: #64748b; }
         button.secondary:hover { background-color: #475569; }
+        button.btn-img { background-color: #0284c7; }
+        button.btn-img:hover { background-color: #0369a1; }
         
         .action-cell-content { display: flex; gap: 8px; justify-content: flex-start; align-items: center; }
         button.action-btn { padding: 6px 12px; font-size: 12px; margin: 0; white-space: nowrap; flex-shrink: 0; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
@@ -133,7 +136,7 @@
     </style>
 </head>
 <body>
-    <h1>🚀 交易模擬器 v13.6 (Uncapped MLB 極限注碼 + 盤口精準標示版)</h1>
+    <h1>🚀 交易模擬器 v13.6.1 (Uncapped MLB 極限注碼 + 盤口精準標示版)</h1>
     
     <div class="ticker-container">
         <div class="ticker-content">
@@ -143,7 +146,7 @@
 
     <div id="toast-container"></div>
 
-    <div class="card">
+    <div class="card" id="dashboardTop">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
             <div>
                 <label style="font-weight:bold;">當前操作賽事：</label>
@@ -169,7 +172,7 @@
                 <div class="stat-value" id="statWinRecord">0-0</div>
                 <div class="stat-sub" id="statWinRatePct" style="color: #64748b;">(0.0%)</div>
             </div>
-            <div class="stat-card clickable" onclick="displayCapitalChart()" title="點擊查看資金走勢圖">
+            <div class="stat-card clickable" onclick="displayCapitalChart()" title="點擊查看純盈虧走勢圖">
                 <div class="stat-label">總盈虧 (Total P&L) 📈</div>
                 <div class="stat-value" id="statPnL">$0.00</div>
                 <div class="stat-sub" id="statPnLPct">0.00%</div>
@@ -182,14 +185,16 @@
             <div class="stat-card">
                 <div class="stat-label">最大回撤 (Max DD)</div>
                 <div class="stat-value neg" id="statDrawdown">0.00%</div>
+                <div class="stat-sub" id="statCurrentDrawdown" style="color: #64748b; margin-top: 4px; font-weight: normal;">目前回撤: 0.00%</div>
             </div>
         </div>
 
         <div class="btn-group">
             <button id="refreshBtn" onclick="fetchData()">🔄 刷新訊號 (Live)</button>
+            <button class="btn-img" onclick="exportToJPG()">📸 匯出戰績圖</button>
             <button class="secondary" onclick="openHelpModal()">📘 使用說明</button>
             <button class="secondary" onclick="toggleOddsDisplay()">🔄 切換賠率格式</button>
-            <button class="secondary" onclick="openHistoryModal()">📜 異動紀錄</button>
+            <button class="secondary" onclick="openHistoryModal()">📜 異提紀錄</button>
             <button class="secondary" onclick="clearHistory()" style="background-color: #ef4444;">🗑️ 重置</button>
             
             <div id="statusContainer" class="status-wrapper">
@@ -257,7 +262,7 @@
 
     <div id="chartSection" class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h2 id="chartTitle" style="margin: 0; font-size: 1.2rem;">走勢圖</h2>
+            <h2 id="chartTitle" style="margin: 0; font-size: 1.2rem;">累計淨盈虧曲線 (Pure P&L)</h2>
             <button onclick="document.getElementById('chartSection').style.display='none'" class="secondary" style="padding: 5px 10px;">關閉</button>
         </div>
         <div id="chartContainer"><canvas id="myChart"></canvas></div>
@@ -282,6 +287,10 @@
                     <li>
                         <div class="help-title">🏦 資金管理與注碼</div>
                         <div class="help-desc">系統自動執行逐日階梯倍投。<b>請注意：目前已解除 MLB 單注防呆上限</b>，系統將完全依照極限動態矩陣火力全開 (最高 3.625%)，請自行留意高額下注時在市場中的流動性風險。下注按鈕會明確標示該下注 <b>獨贏(ML)</b> 或是 <b>讓分(RL)</b>。</div>
+                    </li>
+                    <li>
+                        <div class="help-title">📈 純盈虧圖表 (新功能)</div>
+                        <div class="help-desc">新的資金曲線已過濾掉出入金的操作，將直接反映出您累加的純盈虧 (P&L)。</div>
                     </li>
                 </ul>
             </div>
@@ -814,19 +823,36 @@
             let dd = peak - runningPnL; if (dd > maxDrawdown) maxDrawdown = dd;
         });
 
+        // 新增：目前回撤
+        let currentDrawdown = peak - runningPnL;
+
         const winRate = totalBets > 0 ? (wins / totalBets) * 100 : 0;
         const roi = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
         const principal = bettingData.principals[currentSport] || 1;
         const pnlPercent = (totalPnL / principal) * 100;
         const peakEquity = principal + peak;
+        
         const ddPercent = peakEquity > 0 ? (maxDrawdown / peakEquity) * 100 : 0;
+        const currentDdPercent = peakEquity > 0 ? (currentDrawdown / peakEquity) * 100 : 0;
 
         document.getElementById('statWinRecord').textContent = `${wins}-${losses}`;
         document.getElementById('statWinRatePct').textContent = `(${winRate.toFixed(1)}%)`;
-        const pnlEl = document.getElementById('statPnL'); pnlEl.textContent = (totalPnL >= 0 ? '+' : '') + '$' + totalPnL.toFixed(2); pnlEl.className = 'stat-value ' + (totalPnL >= 0 ? 'pos' : 'neg');
-        const pnlPctEl = document.getElementById('statPnLPct'); pnlPctEl.textContent = (totalPnL >= 0 ? '+' : '') + pnlPercent.toFixed(2) + "% (of Capital)"; pnlPctEl.style.color = totalPnL >= 0 ? '#166534' : '#991b1b';
-        const roiEl = document.getElementById('statROI'); roiEl.textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + "%"; roiEl.className = 'stat-value ' + (roi >= 0 ? 'pos' : 'neg');
+        
+        const pnlEl = document.getElementById('statPnL'); 
+        pnlEl.textContent = (totalPnL >= 0 ? '+' : '') + '$' + totalPnL.toFixed(2); 
+        pnlEl.className = 'stat-value ' + (totalPnL >= 0 ? 'pos' : 'neg');
+        
+        const pnlPctEl = document.getElementById('statPnLPct'); 
+        pnlPctEl.textContent = (totalPnL >= 0 ? '+' : '') + pnlPercent.toFixed(2) + "% (of Capital)"; 
+        pnlPctEl.style.color = totalPnL >= 0 ? '#166534' : '#991b1b';
+        
+        const roiEl = document.getElementById('statROI'); 
+        roiEl.textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + "%"; 
+        roiEl.className = 'stat-value ' + (roi >= 0 ? 'pos' : 'neg');
+        
         document.getElementById('statDrawdown').textContent = "-" + ddPercent.toFixed(2) + "%";
+        // 更新目前回撤 UI
+        document.getElementById('statCurrentDrawdown').textContent = "目前回撤: -" + currentDdPercent.toFixed(2) + "%";
     }
 
     function openStatsModal() {
@@ -988,6 +1014,7 @@
     }
 
     function openFundModal() { document.getElementById('fundModal').style.display = 'flex'; document.getElementById('fundAmount').value = ''; }
+    
     function confirmFundAdjustment() {
         const type = document.getElementById('fundType').value; const amount = parseFloat(document.getElementById('fundAmount').value);
         if (!amount || amount <= 0) { alert('請輸入有效金額'); return; }
@@ -996,26 +1023,130 @@
         saveBettingData(); closeModal('fundModal'); alert('資金調整完成');
     }
 
+    // 修改版：純淨盈虧曲線
     function displayCapitalChart() {
-        const historyList = bettingData.closedBets.filter(b => b.sport === currentSport).sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
-        const labels = [];
-        const data = [];
-        historyList.forEach((b, index) => {
-            labels.push(`${index+1} (${b.date})`);
-            data.push(b.finalBankroll);
-        });
-        const currentOpenBets = bettingData.openBets.filter(b => b.sport === currentSport);
-        const openStakes = currentOpenBets.reduce((acc, b) => acc + b.stake, 0);
-        const currentEquity = bettingData.bankrolls[currentSport] + openStakes;
-        labels.push('Live');
-        data.push(currentEquity);
+        // 過濾掉 'adjustment' (出金/入金)，只計算真實盈虧
+        const historyList = bettingData.closedBets.filter(b => b.sport === currentSport && b.result !== 'adjustment').sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+        
+        const labels = ['Start'];
+        const data = [0]; // 從 0 盈虧開始
+        let cumPnL = 0;
 
-        document.getElementById('chartTitle').textContent = `💰 ${currentSport.toUpperCase()} 資金權益曲線 (Equity Curve)`;
+        historyList.forEach((b, index) => {
+            cumPnL += b.profit;
+            labels.push(`${index+1} (${b.date})`);
+            data.push(cumPnL);
+        });
+
+        document.getElementById('chartTitle').textContent = `📈 ${currentSport.toUpperCase()} 累計淨盈虧曲線 (Pure P&L)`;
         document.getElementById('chartSection').style.display = 'block';
-        const ctx = document.getElementById('myChart').getContext('2d'); if (myChart) myChart.destroy();
-        const gradient = ctx.createLinearGradient(0, 0, 0, 400); gradient.addColorStop(0, 'rgba(75, 192, 192, 0.6)'); gradient.addColorStop(1, 'rgba(75, 192, 192, 0.05)');
-        myChart = new Chart(ctx, { type: 'line', data: { labels: labels, datasets: [{ label: '總權益 (Equity)', data: data, borderColor: '#16a34a', backgroundColor: gradient, borderWidth: 2, fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } } });
+        
+        const ctx = document.getElementById('myChart').getContext('2d'); 
+        if (myChart) myChart.destroy();
+
+        // 依據最終盈虧決定圖表顏色
+        const isPositive = cumPnL >= 0;
+        const lineColor = isPositive ? '#16a34a' : '#dc2626';
+        const gradStart = isPositive ? 'rgba(22, 163, 74, 0.4)' : 'rgba(220, 38, 38, 0.4)';
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400); 
+        gradient.addColorStop(0, gradStart); 
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+        myChart = new Chart(ctx, { 
+            type: 'line', 
+            data: { 
+                labels: labels, 
+                datasets: [{ 
+                    label: '累計淨盈虧 (P&L)', 
+                    data: data, 
+                    borderColor: lineColor, 
+                    backgroundColor: gradient, 
+                    borderWidth: 2, 
+                    fill: true, 
+                    tension: 0.2, 
+                    pointRadius: 2 
+                }] 
+            }, 
+            options: { 
+                responsive: true, 
+                plugins: { legend: { display: false } }, 
+                scales: { y: { beginAtZero: false } } 
+            } 
+        });
         document.getElementById('chartSection').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // 新增：匯出圖片
+    async function exportToJPG() {
+        displayCapitalChart();
+        showToast("📸 正在為您產生戰績報表，請稍候...");
+        
+        await new Promise(r => setTimeout(r, 600));
+
+        const statsNode = document.querySelector('.stats-grid');
+        
+        const container = document.createElement('div');
+        container.style.padding = '30px';
+        container.style.background = '#f8fafc';
+        container.style.width = '800px';
+        container.style.fontFamily = "'Segoe UI', sans-serif";
+        container.style.position = 'absolute';
+        container.style.left = '-9999px'; 
+        container.style.border = '1px solid #e2e8f0';
+        
+        const title = document.createElement('h2');
+        title.innerHTML = `🚀 量化交易終端 戰績報告 - <span>${currentSport.toUpperCase()}</span>`;
+        title.style.color = '#1e293b';
+        title.style.textAlign = 'center';
+        title.style.marginBottom = '20px';
+        title.style.borderBottom = '2px solid #e2e8f0';
+        title.style.paddingBottom = '10px';
+        container.appendChild(title);
+        
+        const clonedStats = statsNode.cloneNode(true);
+        clonedStats.style.display = 'grid';
+        clonedStats.style.gridTemplateColumns = 'repeat(4, 1fr)';
+        clonedStats.style.gap = '15px';
+        clonedStats.style.marginBottom = '30px';
+        container.appendChild(clonedStats);
+        
+        const chartCanvas = document.getElementById('myChart');
+        if (chartCanvas) {
+            const chartImg = document.createElement('img');
+            chartImg.src = chartCanvas.toDataURL('image/png');
+            chartImg.style.width = '100%';
+            chartImg.style.background = 'white';
+            chartImg.style.padding = '15px';
+            chartImg.style.borderRadius = '12px';
+            chartImg.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+            chartImg.style.boxSizing = 'border-box';
+            container.appendChild(chartImg);
+        }
+        
+        const footer = document.createElement('div');
+        footer.textContent = `Generated on: ${new Date().toLocaleString()}`;
+        footer.style.textAlign = 'right';
+        footer.style.fontSize = '0.8em';
+        footer.style.color = '#94a3b8';
+        footer.style.marginTop = '15px';
+        container.appendChild(footer);
+
+        document.body.appendChild(container);
+        
+        try {
+            const canvas = await html2canvas(container, { scale: 2, useCORS: true, logging: false });
+            const link = document.createElement('a');
+            link.download = `QuantReport_${currentSport}_${new Date().toISOString().slice(0,10)}.jpg`;
+            link.href = canvas.toDataURL('image/jpeg', 0.9);
+            link.click();
+            showToast("✅ 戰績圖片已成功下載！");
+        } catch (err) {
+            console.error(err);
+            alert("匯出圖片失敗，請檢查瀏覽器安全性設定。");
+        } finally {
+            document.body.removeChild(container);
+        }
     }
 
     function exportData() { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bettingData)); const downloadAnchorNode = document.createElement('a'); downloadAnchorNode.setAttribute("href", dataStr); downloadAnchorNode.setAttribute("download", "pms_FULL_backup_" + new Date().toISOString().slice(0,10) + ".json"); document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove(); }
@@ -1029,7 +1160,9 @@
     }
 
     function setHistoryFilter(type) { historyFilter = type; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); if (type === 'all') document.getElementById('filterAll').classList.add('active'); if (type === 'settled') document.getElementById('filterSettled').classList.add('active'); if (type === 'sold') document.getElementById('filterSold').classList.add('active'); renderPortfolio(); }
+    
     function setOddsMode(mode) { oddsMode = mode; localStorage.setItem('pms_odds_mode', mode); document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active')); if(mode === 'polymarket') document.getElementById('btnModePoly').classList.add('active'); if(mode === 'american') document.getElementById('btnModeAmer').classList.add('active'); if(mode === 'decimal') document.getElementById('btnModeDec').classList.add('active'); const input = document.getElementById('modalPrice'); const internalPrice = parseFloat(document.getElementById('internalPrice').value) || 0.5; if (mode === 'polymarket') { document.getElementById('priceLabel').textContent = "對應買入價格 (Price):"; input.step = "0.01"; input.value = internalPrice.toFixed(2); } else if (mode === 'american') { document.getElementById('priceLabel').textContent = "美式賠率 (Odds):"; input.step = "1"; input.value = polyToAmerican(internalPrice); } else if (mode === 'decimal') { document.getElementById('priceLabel').textContent = "歐/英賠率 (Decimal):"; input.step = "0.01"; input.value = polyToDecimal(internalPrice); } updateBetCalc(); }
+    
     function updateBetCalc() { const stake = parseFloat(document.getElementById('modalStake').value) || 0; const rawInput = parseFloat(document.getElementById('modalPrice').value); let finalPrice = 0.5; if (!isNaN(rawInput)) { if (oddsMode === 'polymarket') finalPrice = rawInput; else if (oddsMode === 'american') finalPrice = americanToPoly(rawInput); else if (oddsMode === 'decimal') finalPrice = decimalToPoly(rawInput); } if (finalPrice <= 0) finalPrice = 0.01; if (finalPrice >= 1) finalPrice = 0.99; document.getElementById('internalPrice').value = finalPrice; const shares = stake / finalPrice; const profit = shares - stake; document.getElementById('calcShares').textContent = shares.toFixed(2); document.getElementById('calcProfit').textContent = '$' + profit.toFixed(2); }
     
     function openBetModal(team, stake, price, visitor, home, targetType, betTypeStr) { 
@@ -1052,6 +1185,7 @@
     function confirmSell() { const betId = parseInt(document.getElementById('sellBetId').value); const sellShares = parseFloat(document.getElementById('sellShares').value); const sellPrice = parseFloat(document.getElementById('sellPrice').value); const betIdx = bettingData.openBets.findIndex(b => b.id === betId); if(betIdx === -1) return; const bet = bettingData.openBets[betIdx]; if(sellShares > bet.shares + 0.0001) { alert("賣出數量超過持有數量！"); return; } const payout = sellShares * sellPrice; const costBasis = sellShares * bet.price; const profit = payout - costBasis; bettingData.bankrolls[bet.sport] += payout; const historyRecord = { date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team + (sellShares < bet.shares - 0.0001 ? " (Partial)" : ""), stake: costBasis, price: sellPrice, result: "sold", profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() }; bettingData.closedBets.push(historyRecord); if(Math.abs(sellShares - bet.shares) < 0.0001) { bettingData.openBets.splice(betIdx, 1); } else { bet.shares -= sellShares; bet.stake -= costBasis; } saveBettingData(); closeModal('sellModal'); }
     function settleBet(id, result) { const idx = bettingData.openBets.findIndex(b => b.id === id); if (idx === -1) return; const bet = bettingData.openBets[idx]; let profit = 0; let payout = 0; if (result === 'win') { payout = bet.shares * 1.00; profit = payout - bet.stake; bettingData.bankrolls[bet.sport] += payout; } else { profit = -bet.stake; } const closedBet = { date: new Date().toLocaleDateString(), sport: bet.sport, team: bet.team, stake: bet.stake, price: bet.price, result: result, profit: profit, finalBankroll: bettingData.bankrolls[bet.sport], timestamp: Date.now() }; bettingData.closedBets.push(closedBet); bettingData.openBets.splice(idx, 1); saveBettingData(); }
     
+    // **核心渲染保留**
     function renderPortfolio() { 
         const openBody = document.getElementById('openBetsBody'); openBody.innerHTML = ''; 
         const currentOpenBets = bettingData.openBets.filter(b => b.sport === currentSport); 
@@ -1069,6 +1203,7 @@
 
     let progressInterval = null;
 
+    // **API 抓取保留**
     async function fetchData() {
         currentFetchId++; 
         const fetchId = currentFetchId; 
