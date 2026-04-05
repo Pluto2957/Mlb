@@ -16,23 +16,43 @@ function polyToDecimal(p){return p<=0?0:(1/p).toFixed(2);}function americanToPol
 /* --- 原本的 MLB 策略 (SOP 動態讓分) --- */
 function calculateMlbStrategy(u,v,h,vP,hP,vM,hM,vS,b){if(vM===null||hM===null||!u)return{signal:"-",stake:"-",color:"none",highlightTarget:null,edge:0};const mlbBk=['Atlanta Braves','Los Angeles Angels'];if(mlbBk.some(k=>v.includes(k)||h.includes(k)))return{signal:"Blacklist (MLB)",stake:"Observe",color:"observe",highlightTarget:null,edge:0};const vMo=vP/100,hMo=hP/100,vPr=getImpliedProb(vM),hPr=getImpliedProb(hM),vE=vMo-vPr,hE=hMo-hPr,mo=u.getUTCMonth()+1;let vSl=null,vSo=null;if(vS&&vS!=='-'){const sM=String(vS).match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+)\)/);if(sM){vSl=parseFloat(sM[1]);vSo=parseFloat(sM[2]);}}let sT=null,tT="",rN="",tgT="",cE=0,sK=null,ma=0,aB=false;if(vMo<0.65){if(!((mo===7||mo===10)&&vMo>=0.50)){if(vMo>=0.40&&vMo<=0.45&&vM>110){sT='Away';tT=v;tgT='Away';rN="🔥 策略 C (客主力獨贏)";cE=vE;ma=vE;sK='C';aB=true;}if(!aB){if(vMo>=0.40&&vMo<=0.50&&vSl===1.5&&vSo>=-200&&vSo<=-110){sT='Away';tT=v;tgT='Away';rN="🛡️ 策略 D (客受讓保險)";cE=0;ma=0;sK='D';aB=true;}}}}let hB=false;if(!aB&&hMo<0.65){if(!((mo===7||mo===10)&&hMo>=0.50)){if(hMo>=0.45&&hMo<=0.50&&hM>=-110&&hM<=110){sT='Home';tT=h;tgT='Home';rN="🚀 策略 B (主場五五波)";cE=hE;ma=hE;sK='B';hB=true;}if(!hB){if(hMo>=0.35&&hMo<=0.40&&hM>=110&&hM<=300){sT='Home';tT=h;tgT='Home';rN="💥 策略 A (主高賠突擊)";cE=hE;ma=hE;sK='A';hB=true;}}}}if(!sT)return{signal:"-",stake:"-",color:"none",highlightTarget:null,edge:0};let tr='Unclassified',iM=(ma>=0.08&&ma<=0.10),iMU=((mo===7||mo===10)&&((sK==='C'||sK==='D')?vMo<0.50:hMo<0.50));if(iM||iMU){tr='S';rN='🌟[S級重注] '+rN;}else{tr=sK;}let pt=0;if(tr==='S')pt=0.03625;else if(sK==='C'||sK==='B')pt=0.02175;else if(sK==='D')pt=0.01450;else if(sK==='A')pt=0.00725;let bS=b*pt,bTS=(sK==='D')?'讓分+1.5':'獨贏ML',rO=(sK==='D')?vSo:(tgT==='Home'?hM:vM),rP=getImpliedProb(rO);return{signal:(tgT==='Home'?'[主] ':'[客] ')+rN,stake:`[${bTS}] $${bS.toFixed(1)} (${(pt*100).toFixed(2)}%)`,color:"buy",highlightTarget:tgT==='Home'?'home':'visitor',edge:cE,betTypeStr:bTS,recPrice:rP};}
 
-/* --- 新增：MLB 策略 (無讓分矩陣版) --- */
+/* --- 新增：MLB 策略 (無讓分矩陣版 - 階梯式注碼) --- */
 function calculateMlbNoSpreadStrategy(u,v,h,vP,hP,vM,hM,b){
     if(vM===null||hM===null||!u)return{signal:"-",stake:"-",color:"none",highlightTarget:null,edge:0};
     const vMo=vP/100,hMo=hP/100,vPr=getImpliedProb(vM),hPr=getImpliedProb(hM),vE=vMo-vPr,hE=hMo-hPr,vD=vM>0?(vM/100)+1:(100/Math.abs(vM))+1,hD=hM>0?(hM/100)+1:(100/Math.abs(hM))+1;
     let sT=null,tT="",rN="",tgT="",cE=0;
+    
     if(vMo>0.40&&vD>=2.5&&vD<=4.0){sT='Away';tT=v;tgT='Away';rN="🏆 黃金受讓";cE=vE;}
     else if(vMo>=0.40&&vMo<0.45){sT='Away';tT=v;tgT='Away';rN="📊 矩陣: 買客";cE=vE;}
     else if(vMo>=0.50&&vMo<0.55){sT='Home';tT=h;tgT='Home';rN="📊 矩陣: 反買主";cE=hE;}
     else if(hMo>=0.00&&hMo<0.40){sT='Home';tT=h;tgT='Home';rN="📊 矩陣: 買主";cE=hE;}
     else if(hMo>=0.55&&hMo<0.60){sT='Away';tT=v;tgT='Away';rN="📊 矩陣: 反買客";cE=vE;}
+    
     if(!sT)return{signal:"-",stake:"-",color:"none",highlightTarget:null,edge:0};
     const tx=['Atlanta Braves','Los Angeles Angels'];
     if(tx.some(t=>tT.includes(t)))return{signal:`${rN} (毒性過濾)`,stake:"Observe",color:"observe",highlightTarget:tgT==='Home'?'home':'visitor',edge:cE};
-    let m=Math.floor(b/1000);if(m<1)m=1;
-    let bS=23.0*m,mo=u.getUTCMonth(),sTx="";
-    if(mo===3||mo===5){bS*=0.5;sTx=" (季降載)";}
-    return{signal:(tgT==='Home'?'[主] ':'[客] ')+rN,stake:`[無讓分ML] $${bS.toFixed(1)} (${((bS/b)*100).toFixed(1)}%${sTx})`,color:"buy",highlightTarget:tgT==='Home'?'home':'visitor',edge:cE,betTypeStr:'無讓分ML',recPrice:tgT==='Home'?hPr:vPr};
+    
+    // 階梯式注碼計算邏輯 (Step-up Sizing)
+    let stepMultiple = Math.floor(b / 1000); 
+    if (stepMultiple < 1) stepMultiple = 1;  
+    
+    let bS = 23.0 * stepMultiple;
+    let mo=u.getUTCMonth(),sTx="";
+    
+    if(mo===3||mo===5){
+        bS*=0.5;
+        sTx=" (季降載)";
+    }
+    
+    return{
+        signal:(tgT==='Home'?'[主] ':'[客] ')+rN,
+        stake:`[無讓分ML] $${bS.toFixed(1)} (${((bS/b)*100).toFixed(1)}%${sTx})`,
+        color:"buy",
+        highlightTarget:tgT==='Home'?'home':'visitor',
+        edge:cE,
+        betTypeStr:'無讓分ML',
+        recPrice:tgT==='Home'?hPr:vPr
+    };
 }
 
 function calculateNhlStrategy(u,v,h,vP,hP,vM,hM,b){if(!u)return{signal:"-",stake:"-",color:"none",highlightTarget:null};if(u.getUTCMonth()===5)return{signal:"Observe (June)",stake:"0%",color:"observe",highlightTarget:null};const vMo=vP/100,hMo=hP/100;if(vM===null||hM===null)return{signal:"-",stake:"-",color:"none",highlightTarget:null};const vPr=getImpliedProb(vM),hPr=getImpliedProb(hM),vE=vMo-vPr,hE=hMo-hPr;let r={type:null,ruleName:null,target:null,trueProb:0,cap:0,price:0,edge:0};if(hMo>=0.60&&hMo<=0.65&&hE>=0.02)r={type:'Home',ruleName:'🚀 Home Ultra',target:h,trueProb:hMo+0.08,cap:0.08,price:hPr,edge:hE};else if(hMo>=0.46&&hMo<=0.48&&hE>=0.03)r={type:'Home',ruleName:'💎 Home Hidden Gem',target:h,trueProb:hMo+0.12,cap:0.06,price:hPr,edge:hE};else if(hMo>=0.25&&hMo<=0.30&&hE>=-0.02)r={type:'Home',ruleName:'💰 Home Underdog',target:h,trueProb:hMo+0.15,cap:0.05,price:hPr,edge:hE};else if(hMo>=0.45&&hMo<=0.475&&hE<0)r={type:'Home',ruleName:'📉 Home Market Wisdom',target:h,trueProb:hPr+0.05,cap:0.04,price:hPr,edge:hE};else if(hMo>=0.525&&hMo<=0.55&&hE>=0.02)r={type:'Home',ruleName:'✅ Home Mid-Value',target:h,trueProb:hMo+0.025,cap:0.03,price:hPr,edge:hE};else if(vMo>=0.42&&vMo<=0.44&&vE>=0.05)r={type:'Away',ruleName:'🚀 Away Super Edge',target:v,trueProb:vMo+0.15,cap:0.06,price:vPr,edge:vE};else if(vMo>=0.40&&vMo<=0.45&&vE>=0)r={type:'Away',ruleName:'🛡️ Away Stable',target:v,trueProb:vMo+0.04,cap:0.04,price:vPr,edge:vE};else if(vMo>=0.25&&vMo<=0.35&&vE<0)r={type:'Away',ruleName:'📉 Away Wisdom',target:v,trueProb:vPr+0.08,cap:0.04,price:vPr,edge:vE};else if(vMo>=0.60&&vMo<=0.65&&vE>=0)r={type:'Away',ruleName:'⚔️ Away Favorite',target:v,trueProb:vMo+0.05,cap:0.04,price:vPr,edge:vE};else return{signal:"-",stake:"-",color:"none",highlightTarget:null};const bk=["Kraken","Devils","Penguins","Utah"];if(bk.some(k=>r.target.includes(k)))return{signal:`${r.ruleName} (Blacklist)`,stake:"Observe",color:"observe",highlightTarget:r.type==='Home'?'home':'visitor'};if(r.target.includes("Canucks")&&r.type==='Home')return{signal:`${r.ruleName} (Canucks Home)`,stake:"Observe",color:"observe",highlightTarget:'home'};let kS=0;if(r.price<1)kS=((r.trueProb-r.price)/(1.0-r.price))*0.5;if(kS<=0)return{signal:`${r.ruleName} (Neg EV)`,stake:"Skip",color:"none",highlightTarget:null};let fSP=Math.min(kS,r.cap),fA=fSP*b;return{signal:(r.type==='Home'?'[主] ':'[客] ')+r.ruleName,stake:`$${fA.toFixed(1)} (${(fSP*100).toFixed(2)}%)`,color:"buy",highlightTarget:r.type==='Home'?'home':'visitor',edge:r.edge};}
